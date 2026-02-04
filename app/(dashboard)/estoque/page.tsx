@@ -80,6 +80,7 @@ export default function EstoquePage() {
         category_id: productData.category,
         cost: productData.cost,
         price: productData.price,
+        price_with_card: productData.price_with_card,
         status: productData.status,
       })
 
@@ -102,6 +103,7 @@ export default function EstoquePage() {
         category_id: productData.category,
         cost: productData.cost,
         price: productData.price,
+        price_with_card: productData.price_with_card,
         status: productData.status,
       })
 
@@ -227,6 +229,11 @@ export default function EstoquePage() {
                         Preço: <span className="font-medium text-green-600">R$ {product.price.toFixed(2)}</span>
                       </span>
                     )}
+                    {product.price_with_card && (
+                      <span className="text-gray-600">
+                        Cartão: <span className="font-medium text-blue-600">R$ {product.price_with_card.toFixed(2)}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -293,6 +300,7 @@ function ProductForm({
     category: product?.category_id || "",
     cost: product?.cost?.toString() || "",
     price: product?.price?.toString() || "",
+    priceWithCard: product?.price_with_card?.toString() || "",
     status: product?.status || "active",
   })
 
@@ -309,6 +317,7 @@ function ProductForm({
           category: product.category_id || "",
           cost: product.cost.toString(),
           price: product.price ? product.price.toString() : "",
+          priceWithCard: product.price_with_card ? product.price_with_card.toString() : "",
           status: product.status,
         })
       } else {
@@ -318,6 +327,7 @@ function ProductForm({
           category: "",
           cost: "",
           price: "",
+          priceWithCard: "",
           status: "active",
         })
         setSelectedSizes([])
@@ -333,12 +343,14 @@ function ProductForm({
 
     const costValue = Number.parseFloat(formData.cost)
     const priceValue = formData.price ? Number.parseFloat(formData.price) : undefined
+    const priceWithCardValue = formData.priceWithCard ? Number.parseFloat(formData.priceWithCard) : undefined
 
     const productData = {
       name: formData.name,
       category: formData.category,
       cost: costValue,
       price: priceValue,
+      price_with_card: priceWithCardValue,
       status: formData.status as "active" | "inactive",
     }
 
@@ -422,6 +434,19 @@ function ProductForm({
           min="0"
           value={formData.price}
           onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="priceWithCard">Preço com Taxa de Cartão (R$)</Label>
+        <Input
+          type="number"
+          name="priceWithCard"
+          step="0.01"
+          min="0"
+          value={formData.priceWithCard}
+          onChange={(e) => setFormData({ ...formData, priceWithCard: e.target.value })}
+          placeholder="Preço diferenciado para cartão"
         />
       </div>
 

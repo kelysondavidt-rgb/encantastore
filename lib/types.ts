@@ -13,6 +13,7 @@ export interface Product {
   category_id: string | null
   cost: number
   price: number | null
+  price_with_card?: number | null
   status: "active" | "inactive"
   created_at: string
   updated_at: string
