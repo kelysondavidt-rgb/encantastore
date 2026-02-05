@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Search, Plus, Pencil, Trash2 } from "lucide-react"
+import { Search, Plus, Pencil, Trash2, CreditCard, Banknote } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Sale, Product, ProductSize } from "@/lib/types"
@@ -58,8 +58,9 @@ export default function VendasPage() {
     quantity: number
     totalValue: number
     saleDate: string
+    paymentMethod: "money" | "card"
   }) {
-    const { productSizeId, quantity, totalValue, saleDate } = data
+    const { productSizeId, quantity, totalValue, saleDate, paymentMethod } = data
 
     if (!productSizeId || !quantity || !totalValue) {
       toast({ title: "Erro", description: "Preencha todos os campos", variant: "destructive" })
@@ -71,6 +72,7 @@ export default function VendasPage() {
       quantity,
       total_value: totalValue,
       sale_date: saleDate,
+      payment_method: paymentMethod,
     })
 
     if (result) {
@@ -208,6 +210,9 @@ export default function VendasPage() {
                     Tamanho
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Método
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     Quantidade
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -228,6 +233,19 @@ export default function VendasPage() {
                       {sale.product_name}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">{sale.size_name}</td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                      {sale.payment_method === "card" ? (
+                        <div className="flex items-center gap-1 text-blue-600">
+                          <CreditCard className="h-4 w-4" />
+                          <span>Cartão</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-gray-600">
+                          <Banknote className="h-4 w-4" />
+                          <span>Dinheiro</span>
+                        </div>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">{sale.quantity}</td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-green-600">
                       R$ {sale.total_value.toFixed(2)}
@@ -340,6 +358,7 @@ function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
   const [selectedSize, setSelectedSize] = useState("")
   const [quantity, setQuantity] = useState(1)
   const [totalValue, setTotalValue] = useState(0)
+  const [paymentMethod, setPaymentMethod] = useState<"money" | "card">("money")
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -373,12 +392,15 @@ function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
     if (selectedSize && quantity > 0) {
       const size = availableSizes.find((s) => s.id === selectedSize)
       if (size) {
-        setTotalValue(size.unit_price * quantity)
+        const price = paymentMethod === "card" && size.unit_price_card 
+          ? size.unit_price_card 
+          : size.unit_price
+        setTotalValue(price * quantity)
       }
     } else {
       setTotalValue(0)
     }
-  }, [selectedSize, quantity, availableSizes])
+  }, [selectedSize, quantity, availableSizes, paymentMethod])
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -402,6 +424,7 @@ function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
       quantity,
       totalValue,
       saleDate,
+      paymentMethod,
     })
   }
 
@@ -452,6 +475,23 @@ function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
                 {size.size_name} (Estoque: {size.stock_quantity})
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="paymentMethod">Método de Pagamento</Label>
+        <Select
+          value={paymentMethod}
+          onValueChange={(value: "money" | "card") => setPaymentMethod(value)}
+          required
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Selecione o método" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="money">Dinheiro / Pix (Preço Normal)</SelectItem>
+            <SelectItem value="card">Cartão de Crédito (Taxa Inclusa)</SelectItem>
           </SelectContent>
         </Select>
       </div>

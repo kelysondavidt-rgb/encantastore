@@ -36,6 +36,7 @@ export interface Sale {
   size_name: string
   quantity: number
   total_value: number
+  payment_method?: "money" | "card"
   sale_date: string
   created_at: string
 }
@@ -93,5 +94,6 @@ export interface ProductSize {
   size_name: string
   stock_quantity: number
   unit_price: number
+  unit_price_card?: number
   product_name?: string
 }

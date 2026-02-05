@@ -229,6 +229,7 @@ export async function saveSale(sale: Omit<Sale, "id" | "created_at">): Promise<S
   const payload: any = {
     ...sale,
     value: (sale as any).total_value ?? sale.total_value,
+    payment_method: sale.payment_method,
   }
 
   delete payload.total_value
@@ -518,7 +519,7 @@ export async function getProductSizes(productId: string): Promise<ProductSize[]>
       size_id,
       quantity,
       sizes(name, sort_order),
-      products(price)
+      products(price, price_with_card)
     `)
     .eq("product_id", productId)
     .order("sort_order", { foreignTable: "sizes" })
@@ -535,6 +536,7 @@ export async function getProductSizes(productId: string): Promise<ProductSize[]>
     size_name: item.sizes?.name || "",
     stock_quantity: item.quantity || 0,
     unit_price: item.products?.price || 0,
+    unit_price_card: item.products?.price_with_card,
   }))
 }
 
