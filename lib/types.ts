@@ -36,7 +36,7 @@ export interface Sale {
   size_name: string
   quantity: number
   total_value: number
-  payment_method?: "money" | "card"
+  payment_method: "money" | "card"
   sale_date: string
   created_at: string
 }
@@ -96,4 +96,17 @@ export interface ProductSize {
   unit_price: number
   unit_price_card?: number
   product_name?: string
+}
+
+export interface CartItem {
+  tempId: string
+  productId: string
+  productName: string
+  productSizeId: string
+  sizeName: string
+  quantity: number
+  totalValue: number
+  paymentMethod: "money" | "card"
+  saleDate: string
+  availableSizes: ProductSize[]
 }

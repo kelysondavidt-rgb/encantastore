@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Search, Plus, Pencil, Trash2, CreditCard, Banknote, X } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Sale, Product, ProductSize } from "@/lib/types"
+import type { Sale, Product, ProductSize, CartItem } from "@/lib/types"
 import { format } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
 import { getSales, createSale, getProducts, getProductSizes, getAllProductSizes, updateSale, deleteSale } from "@/lib/db"
@@ -53,13 +53,7 @@ export default function VendasPage() {
       sale.size_name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  async function handleAddSale(items: {
-    productSizeId: string
-    quantity: number
-    totalValue: number
-    saleDate: string
-    paymentMethod: "money" | "card"
-  }[]) {
+  async function handleAddSale(items: CartItem[]) {
     if (items.length === 0) return
 
     let successCount = 0
@@ -361,11 +355,11 @@ function EditSaleForm({
     </form>
   )
 }
-function NewSaleForm({ onSubmit }: { onSubmit: (items: any[]) => void }) {
+function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
   const [products, setProducts] = useState<Product[]>([])
   const [allProductSizes, setAllProductSizes] = useState<ProductSize[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [cart, setCart] = useState<any[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   const [saleDate, setSaleDate] = useState(format(new Date(), "yyyy-MM-dd"))
   // We use a dummy state to control the select value and reset it after selection
   const [selectKey, setSelectKey] = useState(0)
