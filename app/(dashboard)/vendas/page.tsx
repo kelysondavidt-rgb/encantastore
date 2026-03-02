@@ -6,13 +6,13 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Search, Plus, Pencil, Trash2, CreditCard, Banknote } from "lucide-react"
+import { Search, Plus, Pencil, Trash2, CreditCard, Banknote, X } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Sale, Product, ProductSize } from "@/lib/types"
 import { format } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
-import { getSales, createSale, getProducts, getProductSizes, updateSale, deleteSale } from "@/lib/db"
+import { getSales, createSale, getProducts, getProductSizes, getAllProductSizes, updateSale, deleteSale } from "@/lib/db"
 import { createClient } from "@/lib/supabase/client"
 
 export default function VendasPage() {
@@ -53,34 +53,44 @@ export default function VendasPage() {
       sale.size_name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  async function handleAddSale(data: {
+  async function handleAddSale(items: {
     productSizeId: string
     quantity: number
     totalValue: number
     saleDate: string
     paymentMethod: "money" | "card"
-  }) {
-    const { productSizeId, quantity, totalValue, saleDate, paymentMethod } = data
+  }[]) {
+    if (items.length === 0) return
 
-    if (!productSizeId || !quantity || !totalValue) {
-      toast({ title: "Erro", description: "Preencha todos os campos", variant: "destructive" })
-      return
+    let successCount = 0
+    let failCount = 0
+
+    for (const item of items) {
+      const result = await createSale({
+        product_size_id: item.productSizeId,
+        quantity: item.quantity,
+        total_value: item.totalValue,
+        sale_date: item.saleDate,
+        payment_method: item.paymentMethod,
+      })
+      if (result) successCount++
+      else failCount++
     }
 
-    const result = await createSale({
-      product_size_id: productSizeId,
-      quantity,
-      total_value: totalValue,
-      sale_date: saleDate,
-      payment_method: paymentMethod,
-    })
-
-    if (result) {
+    if (successCount > 0) {
       await loadSales()
       setIsDialogOpen(false)
-      toast({ title: "Sucesso", description: "Venda registrada com sucesso" })
+      if (failCount === 0) {
+        toast({ title: "Sucesso", description: "Venda(s) registrada(s) com sucesso" })
+      } else {
+        toast({
+          title: "Aviso",
+          description: `${successCount} vendas registradas, ${failCount} falharam (verifique estoque).`,
+          variant: "warning",
+        })
+      }
     } else {
-      toast({ title: "Erro", description: "Erro ao registrar venda. Verifique o estoque.", variant: "destructive" })
+      toast({ title: "Erro", description: "Erro ao registrar vendas. Verifique o estoque.", variant: "destructive" })
     }
   }
 
@@ -351,81 +361,100 @@ function EditSaleForm({
     </form>
   )
 }
-function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
+function NewSaleForm({ onSubmit }: { onSubmit: (items: any[]) => void }) {
   const [products, setProducts] = useState<Product[]>([])
-  const [selectedProduct, setSelectedProduct] = useState("")
-  const [availableSizes, setAvailableSizes] = useState<ProductSize[]>([])
-  const [selectedSize, setSelectedSize] = useState("")
-  const [quantity, setQuantity] = useState(1)
-  const [totalValue, setTotalValue] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState<"money" | "card">("money")
+  const [allProductSizes, setAllProductSizes] = useState<ProductSize[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [cart, setCart] = useState<any[]>([])
+  const [saleDate, setSaleDate] = useState(format(new Date(), "yyyy-MM-dd"))
+  // We use a dummy state to control the select value and reset it after selection
+  const [selectKey, setSelectKey] = useState(0)
 
   useEffect(() => {
-    async function loadProducts() {
-      const data = await getProducts()
-      setProducts(data.filter((p) => p.status === "active"))
+    async function loadData() {
+      const [productsData, sizesData] = await Promise.all([
+        getProducts(),
+        getAllProductSizes()
+      ])
+      setProducts(productsData.filter((p) => p.status === "active"))
+      setAllProductSizes(sizesData)
       setIsLoading(false)
     }
-    loadProducts()
+    loadData()
   }, [])
 
-  useEffect(() => {
-    async function loadSizes() {
-      if (selectedProduct) {
-        const sizes = await getProductSizes(selectedProduct)
-        setAvailableSizes(sizes)
-        setSelectedSize("")
-        setQuantity(1)
-        setTotalValue(0)
-      } else {
-        setAvailableSizes([])
-        setSelectedSize("")
-        setQuantity(1)
-        setTotalValue(0)
-      }
-    }
-    loadSizes()
-  }, [selectedProduct])
+  function handleAddProduct(productId: string) {
+    const product = products.find((p) => p.id === productId)
+    if (!product) return
 
-  useEffect(() => {
-    if (selectedSize && quantity > 0) {
-      const size = availableSizes.find((s) => s.id === selectedSize)
-      if (size) {
-        const price = paymentMethod === "card" && size.unit_price_card 
-          ? size.unit_price_card 
-          : size.unit_price
-        setTotalValue(price * quantity)
-      }
-    } else {
-      setTotalValue(0)
+    // Get available sizes for this product
+    const productSizes = allProductSizes.filter(s => s.product_id === productId)
+    
+    if (productSizes.length === 0) {
+      alert("Este produto não possui tamanhos cadastrados no estoque.")
+      // Force reset select
+      setSelectKey(prev => prev + 1)
+      return
     }
-  }, [selectedSize, quantity, availableSizes, paymentMethod])
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    // Default to first size
+    const defaultSize = productSizes[0]
+    
+    const newItem = {
+      tempId: Date.now().toString(),
+      productId: product.id,
+      productName: product.name,
+      productSizeId: defaultSize.id,
+      sizeName: defaultSize.size_name,
+      quantity: 1,
+      totalValue: defaultSize.unit_price,
+      paymentMethod: "money",
+      saleDate: new Date(saleDate).toISOString(),
+      availableSizes: productSizes
+    }
+
+    setCart(prev => [...prev, newItem])
+    // Reset select
+    setSelectKey(prev => prev + 1)
+  }
+
+  function updateCartItem(tempId: string, field: string, value: any) {
+    setCart(prev => prev.map(item => {
+      if (item.tempId !== tempId) return item
+
+      const updatedItem = { ...item, [field]: value }
+
+      // Recalculate total value if relevant fields change
+      if (field === 'productSizeId' || field === 'quantity' || field === 'paymentMethod') {
+        const size = item.availableSizes.find((s: ProductSize) => s.id === updatedItem.productSizeId)
+        if (size) {
+          const price = updatedItem.paymentMethod === 'card' && size.unit_price_card 
+            ? size.unit_price_card 
+            : size.unit_price
+          updatedItem.totalValue = price * updatedItem.quantity
+          updatedItem.sizeName = size.size_name
+        }
+      }
+
+      return updatedItem
+    }))
+  }
+
+  function removeFromCart(tempId: string) {
+    setCart(cart.filter((item) => item.tempId !== tempId))
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-
-    if (!selectedSize || !quantity || totalValue <= 0) {
-      alert("Preencha todos os campos corretamente")
-      return
-    }
-
-    const maxQuantity = availableSizes.find((s) => s.id === selectedSize)?.stock_quantity || 1
-    if (quantity > maxQuantity) {
-      alert(`Quantidade máxima em estoque para este tamanho é ${maxQuantity}`)
-      return
-    }
-
-    const dateInput = e.currentTarget.querySelector('[name="date"]') as HTMLInputElement
-    const saleDate = dateInput?.value ? new Date(dateInput.value).toISOString() : new Date().toISOString()
-
-    onSubmit({
-      productSizeId: selectedSize,
-      quantity,
-      totalValue,
-      saleDate,
-      paymentMethod,
-    })
+    if (cart.length === 0) return
+    
+    // Ensure dates are current
+    const finalCart = cart.map(item => ({
+      ...item,
+      saleDate: new Date(saleDate).toISOString()
+    }))
+    
+    onSubmit(finalCart)
   }
 
   if (isLoading) {
@@ -436,103 +465,141 @@ function NewSaleForm({ onSubmit }: { onSubmit: (data: any) => void }) {
     )
   }
 
-  const maxQuantity = availableSizes.find((s) => s.id === selectedSize)?.stock_quantity || 1
+  const cartTotal = cart.reduce((acc, item) => acc + item.totalValue, 0)
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Label htmlFor="productId">Produto</Label>
-        <Select value={selectedProduct} onValueChange={setSelectedProduct} required>
-          <SelectTrigger>
-            <SelectValue placeholder="Selecione um produto" />
-          </SelectTrigger>
-          <SelectContent>
-            {products.map((product) => (
-              <SelectItem key={product.id} value={product.id}>
-                {product.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div>
-        <Label htmlFor="size">Tamanho</Label>
-        <Select
-          value={selectedSize}
-          onValueChange={setSelectedSize}
-          required
-          disabled={!selectedProduct || availableSizes.length === 0}
-        >
-          <SelectTrigger>
-            <SelectValue
-              placeholder={availableSizes.length === 0 ? "Nenhum tamanho disponível" : "Selecione um tamanho"}
+    <div className="space-y-6">
+      <div className="space-y-4 rounded-lg border p-4 bg-gray-50/50">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="bg-black text-white p-1 rounded">
+              <Plus className="h-4 w-4" />
+            </div>
+            <h3 className="font-semibold text-gray-900">Nova Venda</h3>
+          </div>
+          <div className="w-40">
+            <Label htmlFor="globalDate" className="sr-only">Data</Label>
+            <Input 
+                id="globalDate"
+                type="date" 
+                value={saleDate}
+                onChange={(e) => setSaleDate(e.target.value)}
+                required 
+                className="bg-white h-9"
             />
-          </SelectTrigger>
-          <SelectContent>
-            {availableSizes.map((size) => (
-              <SelectItem key={size.id} value={size.id}>
-                {size.size_name} (Estoque: {size.stock_quantity})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+            <Label className="text-base font-medium">Adicionar Produto (Toque para selecionar)</Label>
+            <Select key={selectKey} onValueChange={handleAddProduct}>
+              <SelectTrigger className="h-12 text-base bg-white border-black/20 focus:ring-black/20">
+                <SelectValue placeholder="Selecione um produto para adicionar..." />
+              </SelectTrigger>
+              <SelectContent className="z-[9999] max-h-[300px]">
+                {products.map((product) => (
+                  <SelectItem key={product.id} value={product.id} className="text-base py-3 cursor-pointer">
+                    {product.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+        </div>
       </div>
 
-      <div>
-        <Label htmlFor="paymentMethod">Método de Pagamento</Label>
-        <Select
-          value={paymentMethod}
-          onValueChange={(value: "money" | "card") => setPaymentMethod(value)}
-          required
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Selecione o método" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="money">Dinheiro / Pix (Preço Normal)</SelectItem>
-            <SelectItem value="card">Cartão de Crédito (Taxa Inclusa)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Cart List - Editable */}
+      {cart.length > 0 ? (
+        <div className="space-y-4">
+          <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+             <div className="max-h-[400px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-3 py-2 text-left w-[40%]">Produto / Tamanho</th>
+                    <th className="px-3 py-2 text-center w-[25%]">Qtd / Pagamento</th>
+                    <th className="px-3 py-2 text-right w-[25%]">Total</th>
+                    <th className="px-3 py-2 text-center w-[10%]"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {cart.map((item) => (
+                    <tr key={item.tempId} className="bg-white hover:bg-gray-50/50 transition-colors">
+                      <td className="px-3 py-3 align-top space-y-2">
+                        <div className="font-medium text-gray-900">{item.productName}</div>
+                        <Select 
+                          value={item.productSizeId} 
+                          onValueChange={(val) => updateCartItem(item.tempId, 'productSizeId', val)}
+                        >
+                          <SelectTrigger className="h-8 text-xs w-full bg-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="z-[9999]">
+                            {item.availableSizes.map((s: ProductSize) => (
+                              <SelectItem key={s.id} value={s.id} className="text-xs">
+                                {s.size_name} (Est: {s.stock_quantity})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-3 align-top space-y-2">
+                        <Input
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => updateCartItem(item.tempId, 'quantity', Number(e.target.value) || 1)}
+                          min="1"
+                          className="h-8 text-center"
+                        />
+                        <Select 
+                          value={item.paymentMethod} 
+                          onValueChange={(val) => updateCartItem(item.tempId, 'paymentMethod', val)}
+                        >
+                          <SelectTrigger className="h-8 text-xs w-full bg-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="z-[9999]">
+                            <SelectItem value="money" className="text-xs">Dinheiro</SelectItem>
+                            <SelectItem value="card" className="text-xs">Cartão</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-3 text-right font-medium text-green-600 align-top pt-4">
+                        R$ {item.totalValue.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-3 text-center align-middle">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFromCart(item.tempId)}
+                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="bg-gray-50 px-4 py-3 border-t flex justify-between items-center">
+              <span className="font-medium text-gray-600">Total Geral:</span>
+              <span className="font-bold text-lg text-green-700">R$ {cartTotal.toFixed(2)}</span>
+            </div>
+          </div>
 
-      <div>
-        <Label htmlFor="quantity">Quantidade</Label>
-        <Input
-          type="number"
-          value={quantity}
-          onChange={(e) => setQuantity(Number.parseInt(e.target.value) || 1)}
-          min="1"
-          max={maxQuantity}
-          required
-          disabled={!selectedSize}
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="value">Valor Total (R$)</Label>
-        <Input
-          type="number"
-          step="0.01"
-          value={totalValue}
-          onChange={(e) => setTotalValue(Number.parseFloat(e.target.value) || 0)}
-          className="font-semibold text-green-600"
-        />
-        <input type="hidden" name="value" value={totalValue} />
-      </div>
-
-      <div>
-        <Label htmlFor="date">Data</Label>
-        <Input type="date" name="date" defaultValue={format(new Date(), "yyyy-MM-dd")} required />
-      </div>
-
-      <Button
-        type="submit"
-        className="w-full bg-black text-white hover:bg-black/90"
-        disabled={!selectedSize || quantity <= 0}
-      >
-        Registrar Venda
-      </Button>
-    </form>
+          <Button
+            onClick={handleSubmit}
+            className="w-full h-12 text-base bg-black text-white hover:bg-gray-800 shadow-lg transition-all active:scale-[0.98]"
+          >
+            Finalizar Venda ({cart.length} itens)
+          </Button>
+        </div>
+      ) : (
+        <div className="text-center py-12 text-gray-400 bg-gray-50/30 rounded-lg border border-dashed">
+          <p>Nenhum produto selecionado</p>
+          <p className="text-xs mt-1">Selecione um produto acima para começar</p>
+        </div>
+      )}
+    </div>
   )
 }

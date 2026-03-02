@@ -581,7 +581,7 @@ export async function updateProductSize(variantId: string, quantity: number): Pr
 }
 
 export async function createSale(
-  saleData: { product_size_id: string; quantity: number; total_value: number; sale_date: string }
+  saleData: { product_size_id: string; quantity: number; total_value: number; sale_date: string; payment_method: "money" | "card" }
 ): Promise<Sale | null> {
   const supabase = createClient()
   
@@ -635,6 +635,7 @@ export async function createSale(
     quantity: saleData.quantity,
     total_value: saleData.total_value,
     sale_date: saleData.sale_date,
+    payment_method: saleData.payment_method,
   }
 
   return saveSale(newSale)
