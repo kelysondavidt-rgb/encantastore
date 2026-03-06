@@ -8,29 +8,34 @@ export async function updateSession(request: NextRequest) {
 
   // Only create the client if env vars are present to avoid crashes
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-            supabaseResponse = NextResponse.next({
-              request,
-            })
-            cookiesToSet.forEach(({ name, value, options }) =>
-              supabaseResponse.cookies.set(name, value, options),
-            )
+    try {
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        {
+          cookies: {
+            getAll() {
+              return request.cookies.getAll()
+            },
+            setAll(cookiesToSet) {
+              cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+              supabaseResponse = NextResponse.next({
+                request,
+              })
+              cookiesToSet.forEach(({ name, value, options }) =>
+                supabaseResponse.cookies.set(name, value, options),
+              )
+            },
           },
         },
-      },
-    )
-    
-    // Refresh session if needed (optional, but good practice if using Supabase Auth)
-    await supabase.auth.getUser()
+      )
+      
+      // Refresh session if needed (optional, but good practice if using Supabase Auth)
+      await supabase.auth.getUser()
+    } catch (error) {
+      console.error("Middleware Supabase error:", error)
+      // Continue execution even if Supabase fails, to avoid 500 errors
+    }
   }
 
   // Check if user is authenticated by checking custom cookie
