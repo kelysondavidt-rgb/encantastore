@@ -6,32 +6,31 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Search, Plus, Pencil, Trash2, CreditCard, Banknote, X } from "lucide-react"
+import { Search, Plus, Trash2, CreditCard, Banknote, ChevronDown, ChevronUp, Package } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Sale, Product, ProductSize, CartItem } from "@/lib/types"
+import type { Sale, Product, ProductSize, CartItem, Order } from "@/lib/types"
 import { format } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
-import { getSales, createSale, getProducts, getProductSizes, getAllProductSizes, updateSale, deleteSale } from "@/lib/db"
+import { getOrders, createOrder, deleteOrder, getProducts, getAllProductSizes } from "@/lib/db"
 import { createClient } from "@/lib/supabase/client"
 
 export default function VendasPage() {
-  const [sales, setSales] = useState<Sale[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingSale, setEditingSale] = useState<Sale | null>(null)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
-    loadSales()
+    loadOrders()
 
     const supabase = createClient()
     const channel = supabase
-      .channel('realtime-sales')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
-        loadSales()
+      .channel('realtime-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        loadOrders()
       })
       .subscribe()
 
@@ -40,94 +39,64 @@ export default function VendasPage() {
     }
   }, [])
 
-  async function loadSales() {
+  async function loadOrders() {
     setIsLoading(true)
-    const data = await getSales()
-    setSales(data)
+    const data = await getOrders()
+    setOrders(data)
     setIsLoading(false)
   }
 
-  const filteredSales = sales.filter(
-    (sale) =>
-      sale.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sale.size_name.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+  // Filter orders based on ID, date, or items
+  const filteredOrders = orders.filter((order) => {
+    const searchLower = searchQuery.toLowerCase()
+    // Search by ID (last 4 chars)
+    if (order.id.slice(-4).toLowerCase().includes(searchLower)) return true
+    
+    // Search by product name in items
+    if (order.items?.some(item => item.product_name.toLowerCase().includes(searchLower))) return true
+    
+    // Search by date
+    if (format(new Date(order.created_at), "dd/MM/yyyy").includes(searchLower)) return true
+
+    return false
+  })
 
   async function handleAddSale(items: CartItem[]) {
     if (items.length === 0) return
 
-    let successCount = 0
-    let failCount = 0
-
-    for (const item of items) {
-      const result = await createSale({
+    const success = await createOrder(items.map(item => ({
         product_size_id: item.productSizeId,
         quantity: item.quantity,
         total_value: item.totalValue,
         sale_date: item.saleDate,
-        payment_method: item.paymentMethod,
-      })
-      if (result) successCount++
-      else failCount++
-    }
-
-    if (successCount > 0) {
-      await loadSales()
-      setIsDialogOpen(false)
-      if (failCount === 0) {
-        toast({ title: "Sucesso", description: "Venda(s) registrada(s) com sucesso" })
-      } else {
-        toast({
-          title: "Aviso",
-          description: `${successCount} vendas registradas, ${failCount} falharam (verifique estoque).`,
-          variant: "warning",
-        })
-      }
-    } else {
-      toast({ title: "Erro", description: "Erro ao registrar vendas. Verifique o estoque.", variant: "destructive" })
-    }
-  }
-
-  async function handleUpdateSale(data: { id: string; quantity: number; totalValue: number; saleDate: string }) {
-    const { id, quantity, totalValue, saleDate } = data
-
-    if (!quantity || totalValue <= 0) {
-      toast({ title: "Erro", description: "Preencha todos os campos", variant: "destructive" })
-      return
-    }
-
-    const result = await updateSale(id, {
-      quantity,
-      total_value: totalValue,
-      sale_date: saleDate,
-    } as any)
-
-    if (result) {
-      await loadSales()
-      setIsEditDialogOpen(false)
-      setEditingSale(null)
-      toast({ title: "Sucesso", description: "Venda atualizada com sucesso" })
-    } else {
-      toast({
-        title: "Erro",
-        description: "Erro ao atualizar venda. Verifique o estoque.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  async function handleDeleteSale(id: string, description: string) {
-    const confirmed = window.confirm(`Deseja realmente apagar a venda de ${description}?`)
-    if (!confirmed) return
-
-    const success = await deleteSale(id)
+        payment_method: item.paymentMethod
+    })))
 
     if (success) {
-      await loadSales()
-      toast({ title: "Removido", description: "Venda apagada com sucesso" })
+      await loadOrders()
+      setIsDialogOpen(false)
+      toast({ title: "Sucesso", description: "Pedido registrado com sucesso" })
     } else {
-      toast({ title: "Erro", description: "Erro ao apagar venda", variant: "destructive" })
+      toast({ title: "Erro", description: "Erro ao registrar pedido. Verifique o estoque.", variant: "destructive" })
     }
+  }
+
+  async function handleDeleteOrder(id: string) {
+    const confirmed = window.confirm(`Deseja realmente apagar este pedido? Todos os itens serão devolvidos ao estoque.`)
+    if (!confirmed) return
+
+    const success = await deleteOrder(id)
+
+    if (success) {
+      await loadOrders()
+      toast({ title: "Removido", description: "Pedido apagado com sucesso" })
+    } else {
+      toast({ title: "Erro", description: "Erro ao apagar pedido", variant: "destructive" })
+    }
+  }
+
+  function toggleExpand(orderId: string) {
+    setExpandedOrderId(expandedOrderId === orderId ? null : orderId)
   }
 
   if (isLoading) {
@@ -143,7 +112,7 @@ export default function VendasPage() {
       <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-black">Vendas</h1>
-          <p className="mt-1 text-sm text-gray-500">PDV e histórico de transações</p>
+          <p className="mt-1 text-sm text-gray-500">Gestão de Pedidos e Vendas</p>
         </div>
 
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -153,28 +122,11 @@ export default function VendasPage() {
               NOVA VENDA
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-3xl">
             <DialogHeader>
               <DialogTitle>Registrar Nova Venda</DialogTitle>
             </DialogHeader>
             <NewSaleForm onSubmit={handleAddSale} />
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
-          open={isEditDialogOpen}
-          onOpenChange={(open) => {
-            setIsEditDialogOpen(open)
-            if (!open) {
-              setEditingSale(null)
-            }
-          }}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Editar Venda</DialogTitle>
-            </DialogHeader>
-            {editingSale && <EditSaleForm sale={editingSale} onSubmit={handleUpdateSale} />}
           </DialogContent>
         </Dialog>
       </div>
@@ -183,7 +135,7 @@ export default function VendasPage() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <Input
-            placeholder="Buscar histórico por produto ou categoria..."
+            placeholder="Buscar por produto, data ou ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -191,177 +143,141 @@ export default function VendasPage() {
         </div>
       </Card>
 
-      {/* Sales List */}
-      {filteredSales.length === 0 ? (
+      {/* Orders List */}
+      {filteredOrders.length === 0 ? (
         <Card className="border border-gray-200 bg-white p-12">
           <div className="text-center">
-            <p className="text-sm text-gray-500">Nenhuma venda encontrada.</p>
+            <p className="text-sm text-gray-500">Nenhum pedido encontrado.</p>
           </div>
         </Card>
       ) : (
-        <Card className="border border-gray-200 bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-gray-200 bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Data
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Produto
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Tamanho
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Método
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Quantidade
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Valor
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Ações
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredSales.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
-                      {format(new Date(sale.sale_date), "dd/MM/yyyy")}
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs font-medium uppercase text-gray-500">
+              <tr>
+                <th className="px-4 py-3 text-left">Data</th>
+                <th className="px-4 py-3 text-left">Resumo</th>
+                <th className="px-4 py-3 text-left">Pagamento</th>
+                <th className="px-4 py-3 text-center">Qtd Itens</th>
+                <th className="px-4 py-3 text-right">Valor Total</th>
+                <th className="px-4 py-3 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredOrders.map((order) => (
+                <>
+                  <tr 
+                    key={order.id} 
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => toggleExpand(order.id)}
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      {format(new Date(order.created_at), "dd/MM/yyyy")}
+                      <div className="text-xs text-gray-500 font-normal">
+                        {format(new Date(order.created_at), "HH:mm")}
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
-                      {sale.product_name}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">{sale.size_name}</td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
-                      {sale.payment_method === "card" ? (
-                        <div className="flex items-center gap-1 text-blue-600">
-                          <CreditCard className="h-4 w-4" />
-                          <span>Cartão</span>
+                    <td className="px-4 py-3 text-gray-600">
+                      {order.sales && order.sales.length > 0 ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium text-gray-900">{order.sales[0].product_name}</span>
+                          {order.sales.length > 1 && (
+                            <span className="text-xs text-gray-500">
+                              + {order.sales.length - 1} outros itens
+                            </span>
+                          )}
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1 text-gray-600">
-                          <Banknote className="h-4 w-4" />
-                          <span>Dinheiro</span>
-                        </div>
+                        <span className="text-gray-400">Sem itens</span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">{sale.quantity}</td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-green-600">
-                      R$ {sale.total_value.toFixed(2)}
+                    <td className="px-4 py-3 text-gray-600">
+                      <div className="flex items-center gap-1.5">
+                        {order.payment_method === 'card' ? <CreditCard className="h-3.5 w-3.5" /> : <Banknote className="h-3.5 w-3.5" />}
+                        <span>
+                          {order.payment_method === 'card' ? 'Cartão' : order.payment_method === 'money' ? 'Dinheiro' : 'Misto'}
+                        </span>
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900">
-                      <div className="flex justify-end gap-2">
+                    <td className="px-4 py-3 text-center text-gray-600">
+                      {order.sales?.reduce((acc, sale) => acc + sale.quantity, 0) || 0}
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold text-green-600">
+                      R$ {order.total_value.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="flex items-center gap-1"
-                          onClick={() => {
-                            setEditingSale(sale)
-                            setIsEditDialogOpen(true)
-                          }}
+                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleDeleteOrder(order.id)}
                         >
-                          <Pencil className="h-3 w-3" />
-                          Editar
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="flex items-center gap-1 text-red-600 hover:text-red-700"
-                          onClick={() =>
-                            handleDeleteSale(
-                              sale.id,
-                              `${sale.product_name} (${sale.size_name}) - ${sale.quantity} un.`,
-                            )
-                          }
+                          className="h-8 w-8 p-0 text-gray-400"
+                          onClick={() => toggleExpand(order.id)}
                         >
-                          <Trash2 className="h-3 w-3" />
-                          Apagar
+                          {expandedOrderId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                  
+                  {expandedOrderId === order.id && (
+                    <tr className="bg-gray-50/50">
+                      <td colSpan={6} className="p-0">
+                        <div className="border-t border-gray-100 p-4">
+                          <h4 className="mb-3 text-xs font-semibold uppercase text-gray-500">Detalhes do Pedido</h4>
+                          <table className="w-full text-sm">
+                            <thead className="text-xs text-gray-500 bg-gray-100/50">
+                              <tr>
+                                <th className="px-3 py-2 text-left rounded-l">Produto</th>
+                                <th className="px-3 py-2 text-left">Tamanho</th>
+                                <th className="px-3 py-2 text-center">Qtd</th>
+                                <th className="px-3 py-2 text-right">Valor Unit.</th>
+                                <th className="px-3 py-2 text-right rounded-r">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100/50">
+                              {order.sales?.map((sale) => (
+                                <tr key={sale.id}>
+                                  <td className="px-3 py-2 font-medium text-gray-900">{sale.product_name}</td>
+                                  <td className="px-3 py-2 text-gray-600">{sale.size_name}</td>
+                                  <td className="px-3 py-2 text-center text-gray-600">{sale.quantity}</td>
+                                  <td className="px-3 py-2 text-right text-gray-600">
+                                    R$ {(sale.total_value / sale.quantity).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-medium text-gray-900">
+                                    R$ {sale.total_value.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
 }
 
-function EditSaleForm({
-  sale,
-  onSubmit,
-}: {
-  sale: Sale
-  onSubmit: (data: { id: string; quantity: number; totalValue: number; saleDate: string }) => void
-}) {
-  const [quantity, setQuantity] = useState<number>(sale.quantity)
-  const [totalValue, setTotalValue] = useState<number>(sale.total_value)
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-
-    const dateInput = e.currentTarget.querySelector('[name="date"]') as HTMLInputElement
-    const saleDate = dateInput?.value ? new Date(dateInput.value).toISOString() : sale.sale_date
-
-    onSubmit({
-      id: sale.id,
-      quantity,
-      totalValue,
-      saleDate,
-    })
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Label>Produto</Label>
-        <Input type="text" value={`${sale.product_name} (${sale.size_name})`} disabled />
-      </div>
-      <div>
-        <Label htmlFor="quantity">Quantidade</Label>
-        <Input
-          type="number"
-          value={quantity}
-          onChange={(e) => setQuantity(Number.parseInt(e.target.value) || 1)}
-          min="1"
-          required
-        />
-      </div>
-      <div>
-        <Label htmlFor="value">Valor Total (R$)</Label>
-        <Input
-          type="number"
-          step="0.01"
-          value={totalValue}
-          onChange={(e) => setTotalValue(Number.parseFloat(e.target.value) || 0)}
-          className="font-semibold text-green-600"
-        />
-      </div>
-      <div>
-        <Label htmlFor="date">Data</Label>
-        <Input type="date" name="date" defaultValue={format(new Date(sale.sale_date), "yyyy-MM-dd")} required />
-      </div>
-      <Button type="submit" className="w-full bg-black text-white hover:bg-black/90">
-        Salvar Alterações
-      </Button>
-    </form>
-  )
-}
 function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
   const [products, setProducts] = useState<Product[]>([])
   const [allProductSizes, setAllProductSizes] = useState<ProductSize[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [cart, setCart] = useState<CartItem[]>([])
   const [saleDate, setSaleDate] = useState(format(new Date(), "yyyy-MM-dd"))
-  // We use a dummy state to control the select value and reset it after selection
   const [selectKey, setSelectKey] = useState(0)
 
   useEffect(() => {
@@ -381,18 +297,47 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
     const product = products.find((p) => p.id === productId)
     if (!product) return
 
-    // Get available sizes for this product
     const productSizes = allProductSizes.filter(s => s.product_id === productId)
     
     if (productSizes.length === 0) {
       alert("Este produto não possui tamanhos cadastrados no estoque.")
-      // Force reset select
       setSelectKey(prev => prev + 1)
       return
     }
 
-    // Default to first size
     const defaultSize = productSizes[0]
+    
+    // Check if item already exists in cart with same product and size
+    // We assume default payment method (money) for new items
+    const existingItemIndex = cart.findIndex(item => 
+      item.productId === productId && 
+      item.productSizeId === defaultSize.id && 
+      item.paymentMethod === 'money'
+    )
+
+    if (existingItemIndex >= 0) {
+      // Update quantity of existing item
+      setCart(prev => {
+        const newCart = [...prev]
+        const item = newCart[existingItemIndex]
+        const newQuantity = item.quantity + 1
+        
+        // Update total value
+        const size = item.availableSizes.find((s: ProductSize) => s.id === item.productSizeId)
+        const price = item.paymentMethod === 'card' && size?.unit_price_card 
+          ? size.unit_price_card 
+          : size?.unit_price || 0
+          
+        newCart[existingItemIndex] = {
+          ...item,
+          quantity: newQuantity,
+          totalValue: price * newQuantity
+        }
+        return newCart
+      })
+      setSelectKey(prev => prev + 1)
+      return
+    }
     
     const newItem = {
       tempId: Date.now().toString(),
@@ -402,13 +347,12 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
       sizeName: defaultSize.size_name,
       quantity: 1,
       totalValue: defaultSize.unit_price,
-      paymentMethod: "money",
+      paymentMethod: "money" as "money" | "card",
       saleDate: new Date(saleDate).toISOString(),
       availableSizes: productSizes
     }
 
     setCart(prev => [...prev, newItem])
-    // Reset select
     setSelectKey(prev => prev + 1)
   }
 
@@ -418,7 +362,6 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
 
       const updatedItem = { ...item, [field]: value }
 
-      // Recalculate total value if relevant fields change
       if (field === 'productSizeId' || field === 'quantity' || field === 'paymentMethod') {
         const size = item.availableSizes.find((s: ProductSize) => s.id === updatedItem.productSizeId)
         if (size) {
@@ -442,8 +385,32 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
     e.preventDefault()
     if (cart.length === 0) return
     
-    // Ensure dates are current
-    const finalCart = cart.map(item => ({
+    // Merge duplicate items (same product, size, and payment method)
+    const mergedCart: CartItem[] = []
+    
+    cart.forEach(item => {
+      const existingIndex = mergedCart.findIndex(existing => 
+        existing.productSizeId === item.productSizeId && 
+        existing.paymentMethod === item.paymentMethod
+      )
+      
+      if (existingIndex >= 0) {
+        // Update existing item
+        const existing = mergedCart[existingIndex]
+        const newQuantity = existing.quantity + item.quantity
+        const newTotal = existing.totalValue + item.totalValue
+        
+        mergedCart[existingIndex] = {
+          ...existing,
+          quantity: newQuantity,
+          totalValue: newTotal
+        }
+      } else {
+        mergedCart.push(item)
+      }
+    })
+
+    const finalCart = mergedCart.map(item => ({
       ...item,
       saleDate: new Date(saleDate).toISOString()
     }))
@@ -469,7 +436,7 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
             <div className="bg-black text-white p-1 rounded">
               <Plus className="h-4 w-4" />
             </div>
-            <h3 className="font-semibold text-gray-900">Nova Venda</h3>
+            <h3 className="font-semibold text-gray-900">Adicionar Produtos</h3>
           </div>
           <div className="w-40">
             <Label htmlFor="globalDate" className="sr-only">Data</Label>
@@ -485,10 +452,9 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
         </div>
         
         <div className="space-y-2">
-            <Label className="text-base font-medium">Adicionar Produto (Toque para selecionar)</Label>
             <Select key={selectKey} onValueChange={handleAddProduct}>
               <SelectTrigger className="h-12 text-base bg-white border-black/20 focus:ring-black/20">
-                <SelectValue placeholder="Selecione um produto para adicionar..." />
+                <SelectValue placeholder="Toque para selecionar um produto..." />
               </SelectTrigger>
               <SelectContent className="z-[9999] max-h-[300px]">
                 {products.map((product) => (
@@ -501,7 +467,7 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
         </div>
       </div>
 
-      {/* Cart List - Editable */}
+      {/* Cart List */}
       {cart.length > 0 ? (
         <div className="space-y-4">
           <div className="rounded-md border bg-white shadow-sm overflow-hidden">
@@ -509,8 +475,8 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
-                    <th className="px-3 py-2 text-left w-[40%]">Produto / Tamanho</th>
-                    <th className="px-3 py-2 text-center w-[25%]">Qtd / Pagamento</th>
+                    <th className="px-3 py-2 text-left w-[40%]">Produto</th>
+                    <th className="px-3 py-2 text-center w-[25%]">Qtd / Pag</th>
                     <th className="px-3 py-2 text-right w-[25%]">Total</th>
                     <th className="px-3 py-2 text-center w-[10%]"></th>
                   </tr>
@@ -548,26 +514,27 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
                           value={item.paymentMethod} 
                           onValueChange={(val) => updateCartItem(item.tempId, 'paymentMethod', val)}
                         >
-                          <SelectTrigger className="h-8 text-xs w-full bg-white">
+                          <SelectTrigger className="h-8 text-xs w-full bg-white mt-1">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="z-[9999]">
-                            <SelectItem value="money" className="text-xs">Dinheiro</SelectItem>
-                            <SelectItem value="card" className="text-xs">Cartão</SelectItem>
+                            <SelectItem value="money">Dinheiro</SelectItem>
+                            <SelectItem value="card">Cartão</SelectItem>
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="px-3 py-3 text-right font-medium text-green-600 align-top pt-4">
+                      <td className="px-3 py-3 align-top text-right font-medium pt-4">
                         R$ {item.totalValue.toFixed(2)}
                       </td>
-                      <td className="px-3 py-3 text-center align-middle">
+                      <td className="px-3 py-3 align-top text-center pt-3">
                         <Button
+                          type="button"
                           variant="ghost"
                           size="sm"
                           onClick={() => removeFromCart(item.tempId)}
-                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
+                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
                         >
-                          <X className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </td>
                     </tr>
@@ -575,23 +542,28 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
                 </tbody>
               </table>
             </div>
-            <div className="bg-gray-50 px-4 py-3 border-t flex justify-between items-center">
-              <span className="font-medium text-gray-600">Total Geral:</span>
-              <span className="font-bold text-lg text-green-700">R$ {cartTotal.toFixed(2)}</span>
-            </div>
           </div>
 
-          <Button
-            onClick={handleSubmit}
-            className="w-full h-12 text-base bg-black text-white hover:bg-gray-800 shadow-lg transition-all active:scale-[0.98]"
-          >
-            Finalizar Venda ({cart.length} itens)
-          </Button>
+          <div className="rounded-lg bg-gray-900 p-4 text-white shadow-lg">
+            <div className="flex items-center justify-between text-lg font-bold">
+              <span>Total do Pedido</span>
+              <span>R$ {cartTotal.toFixed(2)}</span>
+            </div>
+            <div className="mt-1 text-xs text-gray-400 text-right">
+                {cart.length} itens
+            </div>
+            <Button 
+                onClick={handleSubmit} 
+                className="mt-4 w-full bg-white text-black hover:bg-gray-100 font-bold h-12 text-base"
+            >
+              FINALIZAR VENDA
+            </Button>
+          </div>
         </div>
       ) : (
-        <div className="text-center py-12 text-gray-400 bg-gray-50/30 rounded-lg border border-dashed">
-          <p>Nenhum produto selecionado</p>
-          <p className="text-xs mt-1">Selecione um produto acima para começar</p>
+        <div className="rounded-lg border border-dashed p-8 text-center text-gray-400 bg-gray-50">
+          <Package className="mx-auto h-8 w-8 opacity-50 mb-2" />
+          <p>Nenhum produto adicionado ainda.</p>
         </div>
       )}
     </div>

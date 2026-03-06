@@ -641,6 +641,174 @@ export async function createSale(
   return saveSale(newSale)
 }
 
+export async function createOrder(items: { product_size_id: string; quantity: number; total_value: number; sale_date: string; payment_method: "money" | "card" }[]): Promise<boolean> {
+  const supabase = createClient()
+
+  if (items.length === 0) return false
+
+  // 1. Calculate totals
+  const totalValue = items.reduce((acc, item) => acc + item.total_value, 0)
+  const paymentMethods = new Set(items.map(i => i.payment_method))
+  const orderPaymentMethod = paymentMethods.size > 1 ? 'misto' : items[0].payment_method
+  const saleDate = items[0].sale_date // Use first item date for order
+
+  // 2. Create Order
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .insert({
+      total_value: totalValue,
+      payment_method: orderPaymentMethod,
+      created_at: saleDate, // Override default created_at if needed, or just let it be now()
+      status: 'completed'
+    })
+    .select()
+    .single()
+
+  if (orderError || !order) {
+    console.error("Error creating order:", orderError)
+    return false
+  }
+
+  // 3. Process each item
+  let successCount = 0
+  
+  for (const item of items) {
+    // We use the existing logic but manually to link order_id
+    // Get variant details
+    const { data: variant, error: variantError } = await supabase
+      .from("product_variants")
+      .select(`
+        product_id,
+        size_id,
+        quantity,
+        products (name),
+        sizes (name)
+      `)
+      .eq("id", item.product_size_id)
+      .single()
+
+    if (variantError || !variant) {
+      console.error(`Error fetching variant for item ${item.product_size_id}:`, variantError)
+      continue
+    }
+
+    const currentStock = (variant as any).quantity as number
+    if (currentStock < item.quantity) {
+      console.error(`Not enough stock for item ${item.product_size_id}`)
+      continue
+    }
+
+    // Update stock
+    const { error: stockError } = await supabase
+      .from("product_variants")
+      .update({ quantity: currentStock - item.quantity })
+      .eq("id", item.product_size_id)
+
+    if (stockError) {
+      console.error("Error updating stock:", stockError)
+      continue
+    }
+
+      // Create Sale linked to Order
+      const { error: saleError } = await supabase
+        .from("sales")
+        .insert({
+          product_id: variant.product_id,
+          product_name: (variant.products as any)?.name || "Unknown",
+          size_id: variant.size_id,
+          size_name: (variant.sizes as any)?.name || "Unknown",
+          quantity: item.quantity,
+          value: item.total_value,
+          sale_date: item.sale_date,
+          payment_method: item.payment_method,
+          order_id: order.id
+        })
+
+    if (!saleError) {
+      successCount++
+    } else {
+      console.error("Error creating sale record:", saleError)
+    }
+  }
+
+  return successCount > 0
+}
+
+export async function getOrders() {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('orders')
+    .select(`
+      *,
+      sales (
+        id,
+        product_id,
+        product_name,
+        size_id,
+        size_name,
+        quantity,
+        value,
+        payment_method,
+        sale_date,
+        created_at,
+        order_id
+      )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error("Error fetching orders:", error)
+    return []
+  }
+
+  // Map 'value' from DB to 'total_value' in interface
+  const ordersWithMappedSales = data?.map(order => ({
+    ...order,
+    sales: order.sales?.map((sale: any) => ({
+      ...sale,
+      total_value: sale.value // Map 'value' column to 'total_value' property
+    }))
+  }))
+
+  return ordersWithMappedSales || []
+}
+
+export async function deleteOrder(id: string): Promise<boolean> {
+  const supabase = createClient()
+  
+  // First, restore stock for all items in this order
+  const { data: sales } = await supabase.from('sales').select('*').eq('order_id', id)
+  
+  if (sales) {
+    for (const sale of sales) {
+      // Logic to restore stock similar to deleteSale
+      const { data: variant } = await supabase
+        .from("product_variants")
+        .select("id, quantity")
+        .eq("product_id", sale.product_id)
+        .eq("size_id", sale.size_id)
+        .single()
+        
+      if (variant) {
+        await supabase
+          .from("product_variants")
+          .update({ quantity: variant.quantity + sale.quantity })
+          .eq("id", variant.id)
+      }
+    }
+  }
+
+  // Delete order (sales will cascade delete if configured, but let's be safe)
+  const { error } = await supabase.from('orders').delete().eq('id', id)
+  
+  if (error) {
+    console.error("Error deleting order:", error)
+    return false
+  }
+  
+  return true
+}
+
 export async function createFixedCost(
   cost: Omit<FixedCost, "id" | "created_at" | "updated_at">,
 ): Promise<FixedCost | null> {

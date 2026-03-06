@@ -35,10 +35,21 @@ export interface Sale {
   size_id: string
   size_name: string
   quantity: number
-  total_value: number
+  total_value: number // Mapped from 'value' column
   payment_method: "money" | "card"
   sale_date: string
   created_at: string
+  order_id?: string
+}
+
+export interface Order {
+  id: string
+  total_value: number
+  payment_method: string
+  status: "completed" | "pending" | "cancelled"
+  created_at: string
+  updated_at: string
+  items?: Sale[]
 }
 
 export interface FixedCost {
