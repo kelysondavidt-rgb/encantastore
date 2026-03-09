@@ -49,7 +49,7 @@ export interface Order {
   status: "completed" | "pending" | "cancelled"
   created_at: string
   updated_at: string
-  items?: Sale[]
+  sales?: Sale[]
 }
 
 export interface FixedCost {

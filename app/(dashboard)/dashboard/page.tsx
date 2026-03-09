@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import React from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { getSales, getProducts, getProductSizes, getAllProductSizes } from "@/lib/db"
+import { getSales, getProducts, getAllProductSizes } from "@/lib/db"
 import { createClient } from "@/lib/supabase/client"
 import { DollarSign, ShoppingBag, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
@@ -28,7 +29,112 @@ export default function DashboardPage() {
   const [lowStock, setLowStock] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
+  const calculateMetrics = React.useCallback(async () => {
+    try {
+      const sales = await getSales()
+      const products = await getProducts()
+      const productSizes = await getAllProductSizes()
+
+      const now = new Date()
+      let from = startOfDay(now)
+      let to = endOfDay(now)
+      
+      if (period === "7") {
+        from = startOfDay(subDays(now, 6))
+        to = endOfDay(now)
+      } else if (period === "30") {
+        from = startOfDay(subDays(now, 29))
+        to = endOfDay(now)
+      } else {
+        from = customRange.from ? startOfDay(customRange.from) : startOfDay(now)
+        to = customRange.to ? endOfDay(customRange.to) : endOfDay(now)
+      }
+
+      const filteredSales = sales.filter((sale) => {
+        if (!sale.sale_date) return false
+        try {
+          const saleDate = new Date(sale.sale_date)
+          if (isNaN(saleDate.getTime())) return false
+          return isWithinInterval(saleDate, { start: from, end: to })
+        } catch (e) {
+          console.error("Error parsing date:", sale.sale_date)
+          return false
+        }
+      })
+
+      const revenue = filteredSales.reduce((sum, sale) => {
+        const val = typeof sale.total_value === 'number' ? sale.total_value : parseFloat(sale.total_value as any) || 0
+        return sum + val
+      }, 0)
+      const salesCount = filteredSales.length
+      const costs = filteredSales.reduce((sum, sale) => {
+        const product = products.find((p) => p.id === sale.product_id)
+        return sum + (product?.cost || 0) * sale.quantity
+      }, 0)
+
+      setMetrics({ revenue, salesCount, costs })
+
+      const days = period === "7" ? 7 : period === "30" ? 30 : 7
+      const chartDays = period === 'custom' && from && to 
+        ? Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) 
+        : days
+
+      const chartPoints = []
+      const safeChartDays = Math.min(chartDays, 90)
+      
+      for (let i = safeChartDays - 1; i >= 0; i--) {
+        const date = subDays(to, i)
+        const dayStart = startOfDay(date)
+        const dayEnd = endOfDay(date)
+        const daySales = filteredSales.filter((sale) => {
+          const sDate = new Date(sale.sale_date)
+          return !isNaN(sDate.getTime()) && isWithinInterval(sDate, { start: dayStart, end: dayEnd })
+        })
+        const dayRevenue = daySales.reduce((sum, sale) => {
+          const val = typeof sale.total_value === 'number' ? sale.total_value : parseFloat(sale.total_value as any) || 0
+          return sum + val
+        }, 0)
+        chartPoints.push({
+          date: format(date, "dd/MMM", { locale: ptBR }),
+          value: dayRevenue,
+        })
+      }
+      setChartData(chartPoints)
+
+      const productSalesMap = new Map<string, { name: string; quantity: number }>()
+      filteredSales.forEach((sale) => {
+        const existing = productSalesMap.get(sale.product_id)
+        if (existing) {
+          existing.quantity += sale.quantity
+        } else {
+          productSalesMap.set(sale.product_id, { name: sale.product_name, quantity: sale.quantity })
+        }
+      })
+      const topProductsArray = Array.from(productSalesMap.values())
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 5)
+      setTopProducts(topProductsArray)
+
+      const lowStockItems = productSizes
+        .filter((ps) => ps.stock_quantity < 3 && ps.stock_quantity >= 0)
+        .map((ps) => {
+          const product = products.find((p) => p.id === ps.product_id)
+          return {
+            name: product?.name || "Unknown",
+            size: ps.size_name,
+            quantity: ps.stock_quantity,
+          }
+        })
+      setLowStock(lowStockItems)
+    } catch (error) {
+      console.error("Error calculating metrics:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [period, customRange])
+
   useEffect(() => {
+    // Initial load
     calculateMetrics()
 
     const supabase = createClient()
@@ -48,88 +154,7 @@ export default function DashboardPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [period, customRange])
-
-  function getDateRange() {
-    const now = new Date()
-    if (period === "7") {
-      return { from: startOfDay(subDays(now, 6)), to: endOfDay(now) }
-    } else if (period === "30") {
-      return { from: startOfDay(subDays(now, 29)), to: endOfDay(now) }
-    } else {
-      return {
-        from: customRange.from ? startOfDay(customRange.from) : startOfDay(now),
-        to: customRange.to ? endOfDay(customRange.to) : endOfDay(now),
-      }
-    }
-  }
-
-  async function calculateMetrics() {
-    setIsLoading(true)
-    const sales = await getSales()
-    const products = await getProducts()
-    const productSizes = await getAllProductSizes()
-
-    const { from, to } = getDateRange()
-
-    const filteredSales = sales.filter((sale) => {
-      const saleDate = new Date(sale.sale_date)
-      return isWithinInterval(saleDate, { start: from, end: to })
-    })
-
-    const revenue = filteredSales.reduce((sum, sale) => sum + sale.total_value, 0)
-    const salesCount = filteredSales.length
-    const costs = filteredSales.reduce((sum, sale) => {
-      const product = products.find((p) => p.id === sale.product_id)
-      return sum + (product?.cost || 0) * sale.quantity
-    }, 0)
-
-    setMetrics({ revenue, salesCount, costs })
-
-    const days = period === "7" ? 7 : period === "30" ? 30 : 7
-    const chartPoints = []
-    for (let i = days - 1; i >= 0; i--) {
-      const date = subDays(to, i)
-      const dayStart = startOfDay(date)
-      const dayEnd = endOfDay(date)
-      const daySales = filteredSales.filter((sale) =>
-        isWithinInterval(new Date(sale.sale_date), { start: dayStart, end: dayEnd }),
-      )
-      const dayRevenue = daySales.reduce((sum, sale) => sum + sale.total_value, 0)
-      chartPoints.push({
-        date: format(date, "dd/MMM", { locale: ptBR }),
-        value: dayRevenue,
-      })
-    }
-    setChartData(chartPoints)
-
-    const productSalesMap = new Map<string, { name: string; quantity: number }>()
-    filteredSales.forEach((sale) => {
-      const existing = productSalesMap.get(sale.product_id)
-      if (existing) {
-        existing.quantity += sale.quantity
-      } else {
-        productSalesMap.set(sale.product_id, { name: sale.product_name, quantity: sale.quantity })
-      }
-    })
-    const topProductsArray = Array.from(productSalesMap.values())
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5)
-    setTopProducts(topProductsArray)
-
-    const lowStockItems = productSizes
-      .filter((ps) => ps.stock_quantity < 3 && ps.stock_quantity >= 0)
-      .map((ps) => {
-        const product = products.find((p) => p.id === ps.product_id)
-        return {
-          name: product?.name || "Unknown",
-          size: ps.size_name,
-          quantity: ps.stock_quantity,
-        }
-      })
-    setLowStock(lowStockItems)
-    setIsLoading(false)
-  }
+  }, [calculateMetrics])
 
   if (isLoading) {
     return (
@@ -236,6 +261,7 @@ export default function DashboardPage() {
               <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#999" className="sm:text-xs" />
               <YAxis tick={{ fontSize: 10 }} stroke="#999" className="sm:text-xs" />
               <Tooltip
+                formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, "Receita"]}
                 contentStyle={{
                   backgroundColor: "white",
                   border: "1px solid #e5e5e5",

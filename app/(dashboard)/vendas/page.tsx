@@ -1,7 +1,6 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Search, Plus, Trash2, CreditCard, Banknote, ChevronDown, ChevronUp, Package } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Sale, Product, ProductSize, CartItem, Order } from "@/lib/types"
+import type { Product, ProductSize, CartItem, Order } from "@/lib/types"
 import { format } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
 import { getOrders, createOrder, deleteOrder, getProducts, getAllProductSizes } from "@/lib/db"
@@ -22,6 +21,18 @@ export default function VendasPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
   const { toast } = useToast()
+
+  // Helper to safely format dates
+  const safeFormat = (dateStr: string | Date | null | undefined, formatStr: string) => {
+    try {
+      if (!dateStr) return "-"
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return "-"
+      return format(date, formatStr)
+    } catch (e) {
+      return "-"
+    }
+  }
 
   useEffect(() => {
     loadOrders()
@@ -53,10 +64,15 @@ export default function VendasPage() {
     if (order.id.slice(-4).toLowerCase().includes(searchLower)) return true
     
     // Search by product name in items
-    if (order.items?.some(item => item.product_name.toLowerCase().includes(searchLower))) return true
+    if (order.sales?.some(item => item.product_name.toLowerCase().includes(searchLower))) return true
     
     // Search by date
-    if (format(new Date(order.created_at), "dd/MM/yyyy").includes(searchLower)) return true
+    try {
+      const dateStr = safeFormat(order.created_at, "dd/MM/yyyy")
+      if (dateStr.includes(searchLower)) return true
+    } catch {
+      // ignore date errors in search
+    }
 
     return false
   })
@@ -165,16 +181,15 @@ export default function VendasPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredOrders.map((order) => (
-                <>
+                <React.Fragment key={order.id}>
                   <tr 
-                    key={order.id} 
                     className="cursor-pointer hover:bg-gray-50 transition-colors"
                     onClick={() => toggleExpand(order.id)}
                   >
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      {format(new Date(order.created_at), "dd/MM/yyyy")}
+                      {safeFormat(order.created_at, "dd/MM/yyyy")}
                       <div className="text-xs text-gray-500 font-normal">
-                        {format(new Date(order.created_at), "HH:mm")}
+                        {safeFormat(order.created_at, "HH:mm")}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
@@ -262,7 +277,7 @@ export default function VendasPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

@@ -216,7 +216,10 @@ export async function getSales(): Promise<Sale[]> {
   const rows = (data || []) as any[]
 
   return rows.map((row) => {
-    const totalValue = row.total_value ?? row.value ?? 0
+    // Ensure totalValue is always a number
+    const rawValue = row.total_value ?? row.value ?? 0
+    const totalValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0
+    
     return {
       ...row,
       total_value: totalValue,
@@ -764,9 +767,10 @@ export async function getOrders() {
   // Map 'value' from DB to 'total_value' in interface
   const ordersWithMappedSales = data?.map(order => ({
     ...order,
+    total_value: Number(order.total_value) || 0,
     sales: order.sales?.map((sale: any) => ({
       ...sale,
-      total_value: sale.value // Map 'value' column to 'total_value' property
+      total_value: Number(sale.value) || 0 // Map 'value' column to 'total_value' property
     }))
   }))
 
