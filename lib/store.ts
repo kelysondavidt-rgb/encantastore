@@ -38,7 +38,7 @@ export function saveVariants(variants: ProductVariant[]) {
 export function getSales(): Sale[] {
   if (typeof window === "undefined") return []
   const data = localStorage.getItem(STORAGE_KEYS.SALES)
-  return data ? JSON.parse(data).map((s: any) => ({ ...s, date: new Date(s.date) })) : []
+  return data ? (JSON.parse(data) as Sale[]) : []
 }
 
 export function saveSales(sales: Sale[]) {

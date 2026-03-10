@@ -18,26 +18,30 @@ import {
   AreaChart,
   Area,
 } from "recharts"
-import { TrendingUp, DollarSign, CreditCard, Wallet, PiggyBank } from "lucide-react"
+import { DollarSign, CreditCard, Wallet, PiggyBank } from "lucide-react"
 import { getSales, getFixedCosts, getVariableCosts, getProducts } from "@/lib/db"
 import { createClient } from "@/lib/supabase/client"
-import { format, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, subDays } from "date-fns"
+import { format, subMonths, startOfMonth, endOfMonth, subDays } from "date-fns"
 import { ptBR } from "date-fns/locale"
 
 const chartConfig = {
   income: {
     label: "Receita",
-    color: "hsl(var(--chart-1))",
+    color: "rgb(var(--chart-1))",
   },
   expenses: {
     label: "Despesas",
-    color: "hsl(var(--chart-2))",
+    color: "rgb(var(--chart-2))",
   },
   profit: {
     label: "Lucro",
-    color: "hsl(var(--chart-3))",
+    color: "var(--chart-3)",
   },
 }
+
+type MonthlyStat = { month: string; income: number; expenses: number; profit: number }
+type ExpenseCategory = { name: string; value: number; color: string }
+type DailySpendingPoint = { date: string; value: number }
 
 export default function AnalyticsContent() {
   const [isLoading, setIsLoading] = useState(true)
@@ -47,9 +51,9 @@ export default function AnalyticsContent() {
     netProfit: 0,
     profitMargin: 0,
   })
-  const [monthlyData, setMonthlyData] = useState<any[]>([])
-  const [expenseCategories, setExpenseCategories] = useState<any[]>([])
-  const [dailySpending, setDailySpending] = useState<any[]>([])
+  const [monthlyData, setMonthlyData] = useState<MonthlyStat[]>([])
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([])
+  const [dailySpending, setDailySpending] = useState<DailySpendingPoint[]>([])
 
   useEffect(() => {
     loadData()
@@ -106,9 +110,11 @@ export default function AnalyticsContent() {
           .filter((c) => c.status === "active")
           .reduce((sum, c) => sum + c.monthly_value, 0)
 
-        // Variable costs (simplified estimate based on sales count for this example)
-        // In a real scenario, you'd link variable costs to specific sales or production
-        const expenses = cogs + activeFixedCosts
+        const activeVariableCosts = variableCosts
+          .filter((c) => c.status === "active")
+          .reduce((sum, c) => sum + c.value, 0)
+
+        const expenses = cogs + activeFixedCosts + activeVariableCosts
 
         return {
           month: month.name,

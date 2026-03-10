@@ -10,7 +10,6 @@ import {
   getProducts,
   saveProduct,
   updateProduct,
-  getVariantsByProduct,
   upsertVariant,
   getCategories,
   getSizes,
@@ -73,7 +72,7 @@ export default function EstoquePage() {
     setIsLoading(false)
   }
 
-  async function handleSaveProduct(productData: any, selectedSizes: string[]) {
+  async function handleSaveProduct(productData: ProductFormPayload, selectedSizes: string[]) {
     if (editingProduct) {
       const result = await updateProduct(editingProduct.id, {
         name: productData.name,
@@ -282,6 +281,15 @@ export default function EstoquePage() {
   )
 }
 
+type ProductFormPayload = {
+  name: string
+  category: string
+  cost: number
+  price?: number
+  price_with_card?: number
+  status: "active" | "inactive"
+}
+
 function ProductForm({
   product,
   existingVariants,
@@ -289,7 +297,7 @@ function ProductForm({
 }: {
   product?: Product | null
   existingVariants?: ProductVariantWithDetails[]
-  onSubmit: (productData: any, selectedSizes: string[]) => void
+  onSubmit: (productData: ProductFormPayload, selectedSizes: string[]) => void
 }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [sizes, setSizes] = useState<Size[]>([])

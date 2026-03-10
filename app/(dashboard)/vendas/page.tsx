@@ -29,7 +29,7 @@ export default function VendasPage() {
       const date = new Date(dateStr)
       if (isNaN(date.getTime())) return "-"
       return format(date, formatStr)
-    } catch (e) {
+    } catch {
       return "-"
     }
   }
@@ -339,9 +339,10 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
         
         // Update total value
         const size = item.availableSizes.find((s: ProductSize) => s.id === item.productSizeId)
-        const price = item.paymentMethod === 'card' && size?.unit_price_card 
-          ? size.unit_price_card 
-          : size?.unit_price || 0
+        const price =
+          item.paymentMethod === "card" && size?.unit_price_card != null && !Number.isNaN(Number(size.unit_price_card))
+            ? Number(size.unit_price_card)
+            : Number(size?.unit_price) || 0
           
         newCart[existingItemIndex] = {
           ...item,
@@ -371,7 +372,7 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
     setSelectKey(prev => prev + 1)
   }
 
-  function updateCartItem(tempId: string, field: string, value: any) {
+  function updateCartItem(tempId: string, field: "productSizeId" | "quantity" | "paymentMethod", value: string | number) {
     setCart(prev => prev.map(item => {
       if (item.tempId !== tempId) return item
 
@@ -380,9 +381,10 @@ function NewSaleForm({ onSubmit }: { onSubmit: (items: CartItem[]) => void }) {
       if (field === 'productSizeId' || field === 'quantity' || field === 'paymentMethod') {
         const size = item.availableSizes.find((s: ProductSize) => s.id === updatedItem.productSizeId)
         if (size) {
-          const price = updatedItem.paymentMethod === 'card' && size.unit_price_card 
-            ? size.unit_price_card 
-            : size.unit_price
+          const price =
+            updatedItem.paymentMethod === "card" && size.unit_price_card != null && !Number.isNaN(Number(size.unit_price_card))
+              ? Number(size.unit_price_card)
+              : Number(size.unit_price) || 0
           updatedItem.totalValue = price * updatedItem.quantity
           updatedItem.sizeName = size.size_name
         }

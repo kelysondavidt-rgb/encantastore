@@ -15,6 +15,10 @@ import type {
   ProductSize,
 } from "./types"
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
 // Categories
 export async function getCategories(): Promise<Category[]> {
   const supabase = createClient()
@@ -213,29 +217,29 @@ export async function getSales(): Promise<Sale[]> {
     console.error("[v0] Error fetching sales:", error)
     return []
   }
-  const rows = (data || []) as any[]
+  const rows = (data || []) as unknown[]
 
-  return rows.map((row) => {
-    // Ensure totalValue is always a number
-    const rawValue = row.total_value ?? row.value ?? 0
-    const totalValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0
-    
-    return {
-      ...row,
-      total_value: totalValue,
-    } as Sale
+  return rows.flatMap((row) => {
+    if (!isRecord(row)) return []
+    const rawValue = row["total_value"] ?? row["value"] ?? 0
+    const totalValue = typeof rawValue === "number" ? rawValue : Number(rawValue) || 0
+    return [{ ...row, total_value: totalValue } as unknown as Sale]
   })
 }
 
 export async function saveSale(sale: Omit<Sale, "id" | "created_at">): Promise<Sale | null> {
   const supabase = createClient()
-  const payload: any = {
-    ...sale,
-    value: (sale as any).total_value ?? sale.total_value,
+  const payload: Record<string, unknown> = {
+    product_id: sale.product_id,
+    product_name: sale.product_name,
+    size_id: sale.size_id,
+    size_name: sale.size_name,
+    quantity: sale.quantity,
+    value: sale.total_value,
     payment_method: sale.payment_method,
+    sale_date: sale.sale_date,
+    order_id: sale.order_id ?? null,
   }
-
-  delete payload.total_value
 
   const { data, error } = await supabase.from("sales").insert(payload).select().single()
 
@@ -245,8 +249,10 @@ export async function saveSale(sale: Omit<Sale, "id" | "created_at">): Promise<S
   }
   if (!data) return null
 
-  const row: any = data
-  const totalValue = row.total_value ?? row.value ?? sale.total_value
+  const row = data as unknown
+  if (!isRecord(row)) return null
+  const rawValue = row["total_value"] ?? row["value"] ?? sale.total_value
+  const totalValue = typeof rawValue === "number" ? rawValue : Number(rawValue) || 0
 
   return {
     ...row,
@@ -267,8 +273,8 @@ export async function updateSale(
     return null
   }
 
-  const existingSale = existing as any
-  const oldQuantity = existingSale.quantity as number
+  const existingSale = existing as unknown as { product_id: string; size_id: string; quantity: number }
+  const oldQuantity = existingSale.quantity
 
   const { data: variant, error: variantError } = await supabase
     .from("product_variants")
@@ -282,8 +288,8 @@ export async function updateSale(
     return null
   }
 
-  const variantRow = variant as any
-  const currentStock = (variantRow.quantity as number) ?? 0
+  const variantRow = variant as unknown as { id: string; quantity: number | null }
+  const currentStock = variantRow.quantity ?? 0
   const delta = updates.quantity - oldQuantity
 
   if (delta > 0 && delta > currentStock) {
@@ -291,7 +297,7 @@ export async function updateSale(
     return null
   }
 
-  let newStock = currentStock - delta
+  const newStock = currentStock - delta
 
   const { error: stockError } = await supabase
     .from("product_variants")
@@ -303,7 +309,7 @@ export async function updateSale(
     return null
   }
 
-  const payload: any = {
+  const payload: Record<string, unknown> = {
     quantity: updates.quantity,
     value: updates.total_value,
     sale_date: updates.sale_date,
@@ -316,8 +322,10 @@ export async function updateSale(
     return null
   }
 
-  const row: any = data
-  const totalValue = row.total_value ?? row.value ?? updates.total_value
+  const row = data as unknown
+  if (!isRecord(row)) return null
+  const rawValue = row["total_value"] ?? row["value"] ?? updates.total_value
+  const totalValue = typeof rawValue === "number" ? rawValue : Number(rawValue) || 0
 
   return {
     ...row,
@@ -335,7 +343,7 @@ export async function deleteSale(id: string): Promise<boolean> {
     return false
   }
 
-  const saleRow = existing as any
+  const saleRow = existing as unknown as { product_id: string; size_id: string; quantity: number }
 
   const { data: variant, error: variantError } = await supabase
     .from("product_variants")
@@ -349,9 +357,9 @@ export async function deleteSale(id: string): Promise<boolean> {
     return false
   }
 
-  const variantRow = variant as any
-  const currentStock = (variantRow.quantity as number) ?? 0
-  const newStock = currentStock + (saleRow.quantity as number)
+  const variantRow = variant as unknown as { id: string; quantity: number | null }
+  const currentStock = variantRow.quantity ?? 0
+  const newStock = currentStock + saleRow.quantity
 
   const { error: stockError } = await supabase
     .from("product_variants")
@@ -553,7 +561,7 @@ export async function getAllProductSizes(): Promise<ProductSize[]> {
       size_id,
       quantity,
       sizes(name, sort_order),
-      products(price, name)
+      products(price, price_with_card, name)
     `)
     .order("sort_order", { foreignTable: "sizes" })
 
@@ -568,7 +576,8 @@ export async function getAllProductSizes(): Promise<ProductSize[]> {
     size_id: item.size_id,
     size_name: item.sizes?.name || "",
     stock_quantity: item.quantity || 0,
-    unit_price: item.products?.price || 0,
+    unit_price: Number(item.products?.price) || 0,
+    unit_price_card: item.products?.price_with_card == null ? undefined : Number(item.products?.price_with_card),
     product_name: item.products?.name || "",
   }))
 }

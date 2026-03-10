@@ -16,6 +16,10 @@ import { cn } from "@/lib/utils"
 
 type PeriodFilter = "7" | "30" | "custom"
 
+type ChartPoint = { date: string; value: number }
+type TopProduct = { name: string; quantity: number }
+type LowStockItem = { name: string; size: string; quantity: number }
+
 export default function DashboardPage() {
   const [period, setPeriod] = useState<PeriodFilter>("7")
   const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({})
@@ -24,9 +28,9 @@ export default function DashboardPage() {
     salesCount: 0,
     costs: 0,
   })
-  const [chartData, setChartData] = useState<any[]>([])
-  const [topProducts, setTopProducts] = useState<any[]>([])
-  const [lowStock, setLowStock] = useState<any[]>([])
+  const [chartData, setChartData] = useState<ChartPoint[]>([])
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
+  const [lowStock, setLowStock] = useState<LowStockItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   const calculateMetrics = React.useCallback(async () => {
@@ -56,14 +60,14 @@ export default function DashboardPage() {
           const saleDate = new Date(sale.sale_date)
           if (isNaN(saleDate.getTime())) return false
           return isWithinInterval(saleDate, { start: from, end: to })
-        } catch (e) {
+        } catch {
           console.error("Error parsing date:", sale.sale_date)
           return false
         }
       })
 
       const revenue = filteredSales.reduce((sum, sale) => {
-        const val = typeof sale.total_value === 'number' ? sale.total_value : parseFloat(sale.total_value as any) || 0
+        const val = typeof sale.total_value === "number" ? sale.total_value : Number(sale.total_value) || 0
         return sum + val
       }, 0)
       const salesCount = filteredSales.length
@@ -91,7 +95,7 @@ export default function DashboardPage() {
           return !isNaN(sDate.getTime()) && isWithinInterval(sDate, { start: dayStart, end: dayEnd })
         })
         const dayRevenue = daySales.reduce((sum, sale) => {
-          const val = typeof sale.total_value === 'number' ? sale.total_value : parseFloat(sale.total_value as any) || 0
+          const val = typeof sale.total_value === "number" ? sale.total_value : Number(sale.total_value) || 0
           return sum + val
         }, 0)
         chartPoints.push({
@@ -261,7 +265,7 @@ export default function DashboardPage() {
               <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#999" className="sm:text-xs" />
               <YAxis tick={{ fontSize: 10 }} stroke="#999" className="sm:text-xs" />
               <Tooltip
-                formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, "Receita"]}
+                formatter={(value: number | string) => [`R$ ${Number(value).toFixed(2)}`, "Receita"]}
                 contentStyle={{
                   backgroundColor: "white",
                   border: "1px solid #e5e5e5",
